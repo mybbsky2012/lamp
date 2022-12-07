@@ -1,10 +1,10 @@
-# Copyright (C) 2013 - 2019 Teddysun <i@teddysun.com>
+# Copyright (C) 2013 - 2022 Teddysun <i@teddysun.com>
 # 
 # This file is part of the LAMP script.
 #
 # LAMP is a powerful bash script for the installation of 
-# Apache + PHP + MySQL/MariaDB/Percona and so on.
-# You can install Apache + PHP + MySQL/MariaDB/Percona in an very easy way.
+# Apache + PHP + MySQL/MariaDB and so on.
+# You can install Apache + PHP + MySQL/MariaDB in an very easy way.
 # Just need to input numbers to choose what you want to install before installation.
 # And all things will be done in a few minutes.
 #
@@ -32,9 +32,9 @@ install_apache(){
     --enable-modules=reallyall \
     --enable-mods-shared=reallyall"
 
-    log "Info" "Starting to install dependencies packages for Apache..."
-    local apt_list=(zlib1g-dev openssl libssl-dev libxml2-dev lynx lua-expat-dev libjansson-dev)
-    local yum_list=(zlib-devel openssl-devel libxml2-devel lynx expat-devel lua-devel lua jansson-devel)
+    _info "Installing dependencies for Apache..."
+    local apt_list=(zlib1g-dev openssl libssl-dev libxml2-dev lua-expat-dev libjansson-dev)
+    local yum_list=(zlib-devel openssl-devel libxml2-devel expat-devel lua-devel lua jansson-devel)
     if check_sys packageManager apt; then
         for depend in ${apt_list[@]}; do
             error_detect_depends "apt-get -y install ${depend}"
@@ -44,9 +44,9 @@ install_apache(){
             error_detect_depends "yum -y install ${depend}"
         done
     fi
-    log "Info" "Install dependencies packages for Apache completed..."
+    _info "Install dependencies for Apache completed..."
 
-    if ! grep -qE "^/usr/local/lib" /etc/ld.so.conf.d/*.conf; then
+    if ! grep -q -w -E "^/usr/local/lib" /etc/ld.so.conf.d/*.conf && [ -d "/usr/local/lib" ]; then
         echo "/usr/local/lib" > /etc/ld.so.conf.d/locallib.conf
     fi
     ldconfig
@@ -86,6 +86,7 @@ config_apache(){
         cp -f ${apache_location}/conf/httpd.conf ${apache_location}/conf/httpd.conf.bak
     fi
     mv ${apache_location}/conf/extra/httpd-vhosts.conf ${apache_location}/conf/extra/httpd-vhosts.conf.bak
+    mkdir -p ${apache_location}/conf/ssl/
     mkdir -p ${apache_location}/conf/vhost/
     grep -qE "^\s*#\s*Include conf/extra/httpd-vhosts.conf" ${apache_location}/conf/httpd.conf && \
     sed -i 's#^\s*\#\s*Include conf/extra/httpd-vhosts.conf#Include conf/extra/httpd-vhosts.conf#' ${apache_location}/conf/httpd.conf || \
@@ -196,23 +197,18 @@ mod_xml2enc.so
         fi
     done
     # add mod_md to httpd.conf
-    if [[ $(grep -Ec "^\s*LoadModule md_module modules/mod_md.so" ${apache_location}/conf/httpd.conf) -eq 0 ]]; then
-        if [ -f "${apache_location}/modules/mod_md.so" ]; then
-            lnum=$(sed -n '/LoadModule/=' ${apache_location}/conf/httpd.conf | tail -1)
-            sed -i "${lnum}aLoadModule md_module modules/mod_md.so" ${apache_location}/conf/httpd.conf
-        fi
+    if [[ $(grep -Ec "^\s*LoadModule md_module modules/mod_md.so" ${apache_location}/conf/httpd.conf) -eq 0 ]] && \
+       [[ -s "${apache_location}/modules/mod_md.so" ]]; then
+        lnum=$(sed -n '/LoadModule/=' ${apache_location}/conf/httpd.conf | tail -1)
+        sed -i "${lnum}aLoadModule md_module modules/mod_md.so" ${apache_location}/conf/httpd.conf
     fi
 
     [ -d "${openssl_location}" ] && sed -i "s@^export LD_LIBRARY_PATH.*@export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:${openssl_location}/lib@" ${apache_location}/bin/envvars
     sed -i 's/Allow from All/Require all granted/' ${apache_location}/conf/extra/httpd-vhosts.conf
     sed -i 's/Require host .example.com/Require host localhost/g' ${apache_location}/conf/extra/httpd-info.conf
-    cp -f ${cur_dir}/conf/httpd24-ssl.conf ${apache_location}/conf/extra/httpd-ssl.conf
+    cp -f ${cur_dir}/conf/httpd-ssl.conf ${apache_location}/conf/extra/httpd-ssl.conf
     rm -f /etc/init.d/httpd
-    if centosversion 6; then
-        cp -f ${cur_dir}/init.d/httpd-init-centos6 /etc/init.d/httpd
-    else
-        cp -f ${cur_dir}/init.d/httpd-init /etc/init.d/httpd
-    fi
+    cp -f ${cur_dir}/init.d/httpd-init /etc/init.d/httpd
     sed -i "s#^apache_location=.*#apache_location=${apache_location}#" /etc/init.d/httpd
     chmod +x /etc/init.d/httpd
     rm -fr /var/log/httpd /usr/sbin/httpd
@@ -221,10 +217,6 @@ mod_xml2enc.so
     cp -f ${cur_dir}/conf/index.html ${web_root_dir}
     cp -f ${cur_dir}/conf/index_cn.html ${web_root_dir}
     cp -f ${cur_dir}/conf/lamp.png ${web_root_dir}
-    cp -f ${cur_dir}/conf/jquery.js ${web_root_dir}
-    cp -f ${cur_dir}/conf/p.php ${web_root_dir}
-    cp -f ${cur_dir}/conf/p_cn.php ${web_root_dir}
-    cp -f ${cur_dir}/conf/phpinfo.php ${web_root_dir}
     cp -f ${cur_dir}/conf/favicon.ico ${web_root_dir}
     chown -R apache.apache ${web_root_dir}
     boot_start httpd
@@ -239,7 +231,7 @@ install_apache_modules(){
 
 install_pcre(){
     cd ${cur_dir}/software/
-    log "Info" "${pcre_filename} install start..."
+    _info "Installing ${pcre_filename}..."
     download_file "${pcre_filename}.tar.gz" "${pcre_filename_url}"
     tar zxf ${pcre_filename}.tar.gz
     cd ${pcre_filename}
@@ -249,12 +241,12 @@ install_pcre(){
     error_detect "make install"
     add_to_env "${depends_prefix}/pcre"
     create_lib64_dir "${depends_prefix}/pcre"
-    log "Info" "${pcre_filename} install completed..."
+    _info "Install ${pcre_filename} completed..."
 }
 
 install_nghttp2(){
     cd ${cur_dir}/software/
-    log "Info" "${nghttp2_filename} install start..."
+    _info "Installing ${nghttp2_filename}..."
     download_file "${nghttp2_filename}.tar.gz" "${nghttp2_filename_url}"
     tar zxf ${nghttp2_filename}.tar.gz
     cd ${nghttp2_filename}
@@ -267,7 +259,7 @@ install_nghttp2(){
     error_detect "parallel_make"
     error_detect "make install"
     unset OPENSSL_CFLAGS OPENSSL_LIBS
-    log "Info" "${nghttp2_filename} install completed..."
+    _info "Install ${nghttp2_filename} completed..."
 }
 
 install_openssl(){
@@ -276,7 +268,7 @@ install_openssl(){
 
     if version_lt ${major_version} 1.1.1; then
         cd ${cur_dir}/software/
-        log "Info" "${openssl_filename} install start..."
+        _info "Installing ${openssl_filename}..."
         download_file "${openssl_filename}.tar.gz" "${openssl_filename_url}"
         tar zxf ${openssl_filename}.tar.gz
         cd ${openssl_filename}
@@ -289,20 +281,26 @@ install_openssl(){
             echo "${openssl_location}/lib" > /etc/ld.so.conf.d/openssl.conf
         fi
         ldconfig
-        log "Info" "${openssl_filename} install completed..."
+        _info "Install ${openssl_filename} completed..."
     else
-        log "Info" "OpenSSL version is greater than or equal to 1.1.1, installation skipped."
+        _info "OpenSSL version is greater than or equal to 1.1.1, installation skipped."
     fi
 }
 
 install_mod_wsgi(){
     cd ${cur_dir}/software/
-    log "Info" "${mod_wsgi_filename} install start..."
+    _info "Installing ${mod_wsgi_filename}..."
     download_file "${mod_wsgi_filename}.tar.gz" "${mod_wsgi_filename_url}"
     tar zxf ${mod_wsgi_filename}.tar.gz
     cd ${mod_wsgi_filename}
 
-    error_detect "./configure --with-apxs=${apache_location}/bin/apxs"
+    [ -e "/usr/libexec/platform-python" ] && mod_wsgi_configure="--with-python=/usr/libexec/platform-python" || mod_wsgi_configure=""
+    if [ ! -e "/usr/bin/python" ] && [ -e "/usr/bin/python3" ]; then
+        mod_wsgi_configure="--with-python=/usr/bin/python3"
+    else
+        mod_wsgi_configure=""
+    fi
+    error_detect "./configure --with-apxs=${apache_location}/bin/apxs ${mod_wsgi_configure}"
     error_detect "make"
     error_detect "make install"
     # add mod_wsgi to httpd.conf
@@ -310,12 +308,12 @@ install_mod_wsgi(){
         lnum=$(sed -n '/LoadModule/=' ${apache_location}/conf/httpd.conf | tail -1)
         sed -i "${lnum}aLoadModule wsgi_module modules/mod_wsgi.so" ${apache_location}/conf/httpd.conf
     fi
-    log "Info" "${mod_wsgi_filename} install completed..."
+    _info "Install ${mod_wsgi_filename} completed..."
 }
 
 install_mod_jk(){
     cd ${cur_dir}/software/
-    log "Info" "${mod_jk_filename} install start..."
+    _info "Installing ${mod_jk_filename}..."
     download_file "${mod_jk_filename}.tar.gz" "${mod_jk_filename_url}"
     tar zxf ${mod_jk_filename}.tar.gz
     cd ${mod_jk_filename}/native
@@ -328,12 +326,12 @@ install_mod_jk(){
         lnum=$(sed -n '/LoadModule/=' ${apache_location}/conf/httpd.conf | tail -1)
         sed -i "${lnum}aLoadModule jk_module modules/mod_jk.so" ${apache_location}/conf/httpd.conf
     fi
-    log "Info" "${mod_jk_filename} install completed..."
+    _info "Install ${mod_jk_filename} completed..."
 }
 
 install_mod_security(){
     cd ${cur_dir}/software/
-    log "Info" "${mod_security_filename} install start..."
+    _info "Installing ${mod_security_filename}..."
     download_file "${mod_security_filename}.tar.gz" "${mod_security_filename_url}"
     tar zxf ${mod_security_filename}.tar.gz
     cd ${mod_security_filename}
@@ -347,5 +345,5 @@ install_mod_security(){
         lnum=$(sed -n '/LoadModule/=' ${apache_location}/conf/httpd.conf | tail -1)
         sed -i "${lnum}aLoadModule security2_module modules/mod_security2.so" ${apache_location}/conf/httpd.conf
     fi
-    log "Info" "${mod_security_filename} install completed..."
+    _info "Install ${mod_security_filename} completed..."
 }

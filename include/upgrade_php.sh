@@ -1,10 +1,10 @@
-# Copyright (C) 2013 - 2019 Teddysun <i@teddysun.com>
+# Copyright (C) 2013 - 2022 Teddysun <i@teddysun.com>
 # 
 # This file is part of the LAMP script.
 #
 # LAMP is a powerful bash script for the installation of 
-# Apache + PHP + MySQL/MariaDB/Percona and so on.
-# You can install Apache + PHP + MySQL/MariaDB/Percona in an very easy way.
+# Apache + PHP + MySQL/MariaDB and so on.
+# You can install Apache + PHP + MySQL/MariaDB in an very easy way.
 # Just need to input numbers to choose what you want to install before installation.
 # And all things will be done in a few minutes.
 #
@@ -15,50 +15,57 @@
 upgrade_php(){
 
     if [ ! -d "${php_location}" ]; then
-        log "Error" "PHP looks like not installed, please check it and try again."
-        exit 1
+        _error "PHP looks like not installed, please check it and try again."
     fi
 
     local tram=$( free -m | awk '/Mem/ {print $2}' )
     local swap=$( free -m | awk '/Swap/ {print $2}' )
     local ramsum=$( expr $tram + $swap )
-    [ ${ramsum} -lt 600 ] && disable_fileinfo="--disable-fileinfo" || disable_fileinfo=""
+    [ ${ramsum} -lt 1025 ] && disable_fileinfo="--disable-fileinfo" || disable_fileinfo=""
 
     local phpConfig=${php_location}/bin/php-config
     local php_version=$(get_php_version "${phpConfig}")
     local php_extension_dir=$(get_php_extension_dir "${phpConfig}")
     local installed_php=$(${php_location}/bin/php -r 'echo PHP_VERSION;' 2>/dev/null)
+    local configure_options=$(${phpConfig} --configure-options)
+    local openssl_version=$(openssl version -v)
+    local major_version=$(echo ${openssl_version} | awk '{print $2}' | grep -oE "[0-9.]+")
 
-    if [ "${php_version}" == "5.6" ]; then
-        latest_php="5.6.40"
-    elif [ "${php_version}" == "7.0" ]; then
-        latest_php="7.0.33"
-    elif [ "${php_version}" == "7.1" ]; then
-        latest_php=$(curl -s https://www.php.net/downloads.php | awk '/Changelog/{print $2}' | grep '7.1')
-    elif [ "${php_version}" == "7.2" ]; then
-        latest_php=$(curl -s https://www.php.net/downloads.php | awk '/Changelog/{print $2}' | grep '7.2')
-    elif [ "${php_version}" == "7.3" ]; then
-        latest_php=$(curl -s https://www.php.net/downloads.php | awk '/Changelog/{print $2}' | grep '7.3')
-    fi
+    case "${php_version}" in
+        5.6)
+            latest_php="5.6.40"
+            ;;
+        7.0)
+            latest_php="7.0.33"
+            ;;
+        7.1)
+            latest_php="7.1.33"
+            ;;
+        7.2)
+            latest_php="7.2.34"
+            ;;
+        7.3)
+            latest_php="7.3.33"
+            ;;
+        7.4)
+            latest_php="$(curl -4s https://www.php.net/downloads.php | awk '/Changelog/{print $2}' | grep '7.4')"
+            ;;
+        8.0)
+            latest_php="$(curl -4s https://www.php.net/downloads.php | awk '/Changelog/{print $2}' | grep '8.0')"
+            ;;
+        8.1)
+            latest_php="$(curl -4s https://www.php.net/downloads.php | awk '/Changelog/{print $2}' | grep '8.1')"
+            ;;
+        *)
+        # do nothing
+    esac
 
-    echo -e "Latest version of PHP: \033[41;37m ${latest_php} \033[0m"
-    echo -e "Installed version of PHP: \033[41;37m ${installed_php} \033[0m"
-    echo
-    echo "Do you want to upgrade PHP ? (y/n)"
-    read -p "(Default: n):" upgrade_php
-    if [ -z ${upgrade_php} ]; then
-        upgrade_php="n"
-    fi
-    echo "---------------------------"
-    echo "You choose = ${upgrade_php}"
-    echo "---------------------------"
-    echo
-    echo "Press any key to start...or Press Ctrl+C to cancel"
-    char=$(get_char)
-
+    _info "Latest version of PHP   : $(_red ${latest_php})"
+    _info "Installed version of PHP: $(_red ${installed_php})"
+    read -p "Do you want to upgrade PHP? (y/n) (Default: n):" upgrade_php
+    [ -z "${upgrade_php}" ] && upgrade_php="n"
     if [[ "${upgrade_php}" = "y" || "${upgrade_php}" = "Y" ]]; then
-
-        log "Info" "PHP upgrade start..."
+        _info "PHP upgrade start..."
         if [[ -d "${php_location}.bak" && -d "${php_location}" ]]; then
             rm -rf ${php_location}.bak
         fi
@@ -67,99 +74,43 @@ upgrade_php(){
         if [ ! -d ${cur_dir}/software ]; then
             mkdir -p ${cur_dir}/software
         fi
-        cd ${cur_dir}/software
 
-        if [ ! -s php-${latest_php}.tar.gz ]; then
+        [ ! -e "${depends_prefix}/libiconv/bin/iconv" ] && install_libiconv
+        if ! grep -q -w -E "^${depends_prefix}/libiconv/lib" /etc/ld.so.conf.d/*.conf; then
+            echo "${depends_prefix}/libiconv/lib" > /etc/ld.so.conf.d/libiconvlib.conf
+        fi
+
+        cd ${cur_dir}/software
+        if [ -s "php-${latest_php}.tar.gz" ]; then
+            rm -fr php-${latest_php}/
+            tar zxf php-${latest_php}.tar.gz
+            cd php-${latest_php}/
+        else
             latest_php_link="https://www.php.net/distributions/php-${latest_php}.tar.gz"
             backup_php_link="${download_root_url}/php-${latest_php}.tar.gz"
             untar ${latest_php_link} ${backup_php_link}
-        else
-            tar zxf php-${latest_php}.tar.gz
-            cd php-${latest_php}/
         fi
 
-        if [ -d "${mariadb_location}" ] || [ -d "${mysql_location}" ] || [ -d "${percona_location}" ]; then
-            if [ "${php_version}" == "5.6" ]; then
-                with_mysql="--enable-mysqlnd --with-mysql=mysqlnd --with-mysqli=mysqlnd --with-mysql-sock=/tmp/mysql.sock --with-pdo-mysql=mysqlnd"
-            else
-                with_mysql="--enable-mysqlnd --with-mysqli=mysqlnd --with-mysql-sock=/tmp/mysql.sock --with-pdo-mysql=mysqlnd"
-            fi
-        else
-            with_mysql=""
+        # Fixed a libenchant-2 error in PHP 7.4 for Debian or Ubuntu
+        if [ "${php_version}" == "7.4" ] && dpkg -l 2>/dev/null | grep -q "libenchant-2-dev"; then
+            patch -p1 < ${cur_dir}/src/remove-deprecated-call-and-deprecate-function.patch
+            patch -p1 < ${cur_dir}/src/use-libenchant-2-when-available.patch
+            ./buildconf -f
         fi
-
-        if [ "${php_version}" == "5.6" ]; then
-            with_gd="--with-gd --with-vpx-dir --with-jpeg-dir --with-png-dir --with-xpm-dir --with-freetype-dir"
-        else
-            with_gd="--with-gd --with-webp-dir --with-jpeg-dir --with-png-dir --with-xpm-dir --with-freetype-dir"
+        # Fixed PHP extension snmp build without DES
+        if [ "${php_version}" == "7.4" ]; then
+            patch -p1 < ${cur_dir}/src/php-7.4-snmp.patch
         fi
-
-        if [[ "${php_version}" == "7.2" || "${php_version}" == "7.3" ]]; then
-            other_options="--enable-zend-test"
-        else
-            other_options="--with-mcrypt --enable-gd-native-ttf"
+        # Fixed build with OpenSSL 3.0 with disabling useless RSA_SSLV23_PADDING
+        if [ "${php_version}" == "7.4" ] && version_ge ${major_version} 3.0.0; then
+            patch -p1 < ${cur_dir}/src/minimal_fix_for_openssl_3.0_php7.4.patch
         fi
-
-        if [ "${php_version}" == "7.3" ]; then
-            with_libmbfl=""
-        else
-            with_libmbfl="--with-libmbfl"
+        if [ "${php_version}" == "8.0" ] && version_ge ${major_version} 3.0.0; then
+            patch -p1 < ${cur_dir}/src/minimal_fix_for_openssl_3.0_php8.0.patch
         fi
-
-        is_64bit && with_libdir="--with-libdir=lib64" || with_libdir=""
-
-        php_configure_args="--prefix=${php_location} \
-        --with-apxs2=${apache_location}/bin/apxs \
-        --with-config-file-path=${php_location}/etc \
-        --with-config-file-scan-dir=${php_location}/php.d \
-        --with-pcre-dir=${depends_prefix}/pcre \
-        --with-imap \
-        --with-kerberos \
-        --with-imap-ssl \
-        --with-libxml-dir \
-        --with-openssl \
-        --with-snmp \
-        ${with_libdir} \
-        ${with_mysql} \
-        ${with_gd} \
-        --with-zlib \
-        --with-bz2 \
-        --with-curl=/usr \
-        --with-gettext \
-        --with-gmp \
-        --with-mhash \
-        --with-icu-dir=/usr \
-        --with-ldap \
-        --with-ldap-sasl \
-        ${with_libmbfl} \
-        --with-onig \
-        --with-unixODBC \
-        --with-pspell=/usr \
-        --with-enchant=/usr \
-        --with-readline \
-        --with-tidy=/usr \
-        --with-xmlrpc \
-        --with-xsl \
-        --without-pear \
-        ${other_options} \
-        --enable-bcmath \
-        --enable-calendar \
-        --enable-dba \
-        --enable-exif \
-        --enable-ftp \
-        --enable-gd-jis-conv \
-        --enable-intl \
-        --enable-mbstring \
-        --enable-pcntl \
-        --enable-shmop \
-        --enable-soap \
-        --enable-sockets \
-        --enable-wddx \
-        --enable-zip \
-        ${disable_fileinfo}"
-
-        error_detect "./configure ${php_configure_args}"
-        error_detect "parallel_make ZEND_EXTRA_LIBS='-liconv'"
+        ldconfig
+        error_detect "./configure ${configure_options}"
+        error_detect "parallel_make"
         error_detect "make install"
 
         mkdir -p ${php_location}/{etc,php.d}
@@ -168,17 +119,19 @@ upgrade_php(){
         if [ $(ls ${php_location}.bak/php.d/ | wc -l) -gt 0 ]; then
             cp -pf ${php_location}.bak/php.d/* ${php_location}/php.d/
         fi
-        log "Info" "Clear up start..."
+        _info "Restart Apache..."
+        /etc/init.d/httpd stop > /dev/null 2>&1
+        sleep 3
+        /etc/init.d/httpd start > /dev/null 2>&1
+        _info "Clear up start..."
         cd ${cur_dir}/software
         rm -rf php-${latest_php}/
         rm -f php-${latest_php}.tar.gz
-        log "Info" "Clear up completed..."
-        /etc/init.d/httpd restart > /dev/null 2>&1
-        log "Info" "PHP upgrade completed..."
+        _info "Clear up completed..."
+        echo
+        _info "PHP upgrade completed..."
     else
-        echo
-        log "Info" "PHP upgrade cancelled, nothing to do..."
-        echo
+        _info "PHP upgrade cancelled, nothing to do..."
     fi
 
 }

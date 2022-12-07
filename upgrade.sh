@@ -1,23 +1,21 @@
 #!/usr/bin/env bash
-# Copyright (C) 2013 - 2019 Teddysun <i@teddysun.com>
+# Copyright (C) 2013 - 2022 Teddysun <i@teddysun.com>
 # 
 # This file is part of the LAMP script.
 #
 # LAMP is a powerful bash script for the installation of 
-# Apache + PHP + MySQL/MariaDB/Percona and so on.
-# You can install Apache + PHP + MySQL/MariaDB/Percona in an very easy way.
+# Apache + PHP + MySQL/MariaDB and so on.
+# You can install Apache + PHP + MySQL/MariaDB in an very easy way.
 # Just need to input numbers to choose what you want to install before installation.
 # And all things will be done in a few minutes.
 #
-# System Required:  CentOS 6+ / Fedora28+ / Debian 8+ / Ubuntu 14+
-# Description:  Update LAMP(Linux + Apache + MySQL/MariaDB/Percona + PHP )
 # Website:  https://lamp.sh
 # Github:   https://github.com/teddysun/lamp
 
 PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
 export PATH
 
-cur_dir=$(pwd)
+cur_dir=$(cd -P -- "$(dirname -- "$0")" && pwd -P)
 
 include(){
     local include=$1
@@ -33,23 +31,24 @@ upgrade_menu(){
 
     echo
     echo "+-------------------------------------------------------------------+"
-    echo "| Auto Update LAMP(Linux + Apache + MySQL/MariaDB/Percona + PHP )   |"
-    echo "| Intro: https://lamp.sh                                            |"
-    echo "| Author: Teddysun <i@teddysun.com>                                 |"
+    echo "| Auto Update LAMP(Linux + Apache + MySQL/MariaDB + PHP )           |"
+    echo "| Website: https://lamp.sh                                          |"
+    echo "| Author : Teddysun <i@teddysun.com>                                |"
     echo "+-------------------------------------------------------------------+"
     echo
 
     while true
     do
-    echo -e "\t\033[1;32m1\033[0m. Upgrade Apache"
-    echo -e "\t\033[1;32m2\033[0m. Upgrade MySQL/MariaDB/Percona"
-    echo -e "\t\033[1;32m3\033[0m. Upgrade PHP"
-    echo -e "\t\033[1;32m4\033[0m. Upgrade phpMyAdmin"
-    echo -e "\t\033[1;32m5\033[0m. Exit"
+    _info "$(_green 1). Upgrade Apache"
+    _info "$(_green 2). Upgrade MySQL or MariaDB"
+    _info "$(_green 3). Upgrade PHP"
+    _info "$(_green 4). Upgrade phpMyAdmin"
+    _info "$(_green 5). Upgrade Adminer"
+    _info "$(_green 6). Exit"
     echo
     read -p "Please input a number: " number
-    if [[ ! ${number} =~ ^[1-5]$ ]]; then
-        log "Error" "Input error. please only input 1,2,3,4,5"
+    if [[ ! ${number} =~ ^[1-6]$ ]]; then
+        _error "Input error, please only input 1~6"
     else
         case "${number}" in
         1)
@@ -69,6 +68,10 @@ upgrade_menu(){
             break
             ;;
         5)
+            upgrade_adminer 2>&1 | tee ${cur_dir}/upgrade_adminer.log
+            break
+            ;;
+        6)
             exit
             ;;
         esac
@@ -80,21 +83,24 @@ upgrade_menu(){
 display_usage(){
 printf "
 
-Usage: $0 [ apache | db | php | phpmyadmin ]
+Usage: $0 [ apache | db | php | phpmyadmin | adminer ]
 apache                    --->Upgrade Apache
-db                        --->Upgrade MySQL/MariaDB/Percona
+db                        --->Upgrade MySQL or MariaDB
 php                       --->Upgrade PHP
 phpmyadmin                --->Upgrade phpMyAdmin
+adminer                   --->Upgrade Adminer
 
 "
 }
 
 include config
 include public
+include php-modules
 include upgrade_apache
 include upgrade_db
 include upgrade_php
 include upgrade_phpmyadmin
+include upgrade_adminer
 load_config
 rootness
 
@@ -113,6 +119,9 @@ elif [ ${#} -eq 1 ]; then
         ;;
     phpmyadmin)
         upgrade_phpmyadmin 2>&1 | tee ${cur_dir}/upgrade_phpmyadmin.log
+        ;;
+    adminer)
+        upgrade_adminer 2>&1 | tee ${cur_dir}/upgrade_adminer.log
         ;;
     *)
         display_usage

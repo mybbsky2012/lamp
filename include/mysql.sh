@@ -1,24 +1,30 @@
-# Copyright (C) 2013 - 2019 Teddysun <i@teddysun.com>
+# Copyright (C) 2013 - 2022 Teddysun <i@teddysun.com>
 # 
 # This file is part of the LAMP script.
 #
 # LAMP is a powerful bash script for the installation of 
-# Apache + PHP + MySQL/MariaDB/Percona and so on.
-# You can install Apache + PHP + MySQL/MariaDB/Percona in an very easy way.
+# Apache + PHP + MySQL/MariaDB and so on.
+# You can install Apache + PHP + MySQL/MariaDB in an very easy way.
 # Just need to input numbers to choose what you want to install before installation.
 # And all things will be done in a few minutes.
 #
 # Website:  https://lamp.sh
 # Github:   https://github.com/teddysun/lamp
 
-#Pre-installation mysql or mariadb or percona
+#Pre-installation mysql or mariadb
 mysql_preinstall_settings(){
 
     if version_lt $(get_libc_version) 2.14; then
         mysql_arr=(${mysql_arr[@]#${mariadb10_3_filename}})
         mysql_arr=(${mysql_arr[@]#${mariadb10_4_filename}})
+        mysql_arr=(${mysql_arr[@]#${mariadb10_5_filename}})
+        mysql_arr=(${mysql_arr[@]#${mariadb10_6_filename}})
+        mysql_arr=(${mysql_arr[@]#${mariadb10_7_filename}})
     fi
-    display_menu mysql 3
+    # mariadb 10.6, 10.7 not support 32 bit
+    is_64bit || mysql_arr=(${mysql_arr[@]#${mariadb10_6_filename}})
+    is_64bit || mysql_arr=(${mysql_arr[@]#${mariadb10_7_filename}})
+    display_menu mysql 1
 
     if [ "${mysql}" != "do_not_install" ];then
         if echo "${mysql}" | grep -qi "mysql"; then
@@ -53,41 +59,15 @@ mysql_preinstall_settings(){
             echo
             echo "mariadb server root password: $mariadb_root_pass"
 
-        elif echo "${mysql}" | grep -qi "Percona"; then
-            if [ "${mysql}" == "${percona8_0_filename}" ] && ! is_64bit; then
-                log "Error" "${percona8_0_filename} is not support 32 bit OS, please change to 64 bit OS and try again."
-                exit 1
-            fi
-            #percona data
-            echo
-            read -p "percona data location(default:${percona_location}/data, leave blank for default): " percona_data_location
-            percona_data_location=${percona_data_location:=${percona_location}/data}
-            percona_data_location=$(filter_location "${percona_data_location}")
-            echo
-            echo "percona data location: $percona_data_location"
-
-            #set percona server root password
-            echo
-            read -p "percona server root password (default:lamp.sh, leave blank for default): " percona_root_pass
-            percona_root_pass=${percona_root_pass:=lamp.sh}
-            echo
-            echo "percona server root password: ${percona_root_pass}"
-
         fi
     fi
 }
 
 #Install Database common
 common_install(){
-
-    local apt_list=(libncurses5-dev cmake m4 bison libaio1 libaio-dev numactl)
-    local yum_list=(ncurses-devel cmake m4 bison libaio libaio-devel numactl-devel libevent)
-    if is_64bit; then
-        local perl_data_dumper_url="${download_root_url}/perl-Data-Dumper-2.125-1.el6.rf.x86_64.rpm"
-    else
-        local perl_data_dumper_url="${download_root_url}/perl-Data-Dumper-2.125-1.el6.rf.i686.rpm"
-    fi
-    log "Info" "Starting to install dependencies packages for Database..."
+    local apt_list=(libncurses5 libncurses5-dev cmake m4 bison libaio1 libaio-dev numactl)
+    local yum_list=(ncurses-devel cmake m4 bison libaio libaio-devel numactl-devel libevent perl-Data-Dumper)
+    _info "Installing dependencies for Database..."
     if check_sys packageManager apt; then
         for depend in ${apt_list[@]}; do
             error_detect_depends "apt-get -y install ${depend}"
@@ -96,31 +76,33 @@ common_install(){
         for depend in ${yum_list[@]}; do
             error_detect_depends "yum -y install ${depend}"
         done
-        if centosversion 6; then
-            rpm -q perl-Data-Dumper > /dev/null 2>&1
-            if [ $? -ne 0 ]; then
-                log "Info" "Starting to install package perl-Data-Dumper"
-                rpm -Uvh ${perl_data_dumper_url} > /dev/null 2>&1
-                [ $? -ne 0 ] && log "Error" "Install package perl-Data-Dumper failed" && exit 1
-            fi
-        else
-            error_detect_depends "yum -y install perl-Data-Dumper"
-        fi
-        if echo $(get_opsy) | grep -Eqi "fedora"; then
+        if centosversion 8 || echo ${opsy} | grep -Eqi "fedora" || echo ${opsy} | grep -Eqi "amazon"; then
             error_detect_depends "yum -y install ncurses-compat-libs"
         fi
+        # Fixed libncurses.so.5: cannot open shared object file: No such file or directory
+        if is_64bit; then
+            if [ ! -e "/usr/lib64/libncurses.so.5" ] && [ -e "/usr/lib64/libncurses.so.6" ]; then
+                ln -sf /usr/lib64/libncurses.so.6 /usr/lib64/libncurses.so.5
+            fi
+            if [ ! -e "/usr/lib64/libtinfo.so.5" ] && [ -e "/usr/lib64/libtinfo.so.6" ]; then
+                ln -sf /usr/lib64/libtinfo.so.6 /usr/lib64/libtinfo.so.5
+            fi
+        else
+            if [ ! -e "/usr/lib/libncurses.so.5" ] && [ -e "/usr/lib/libncurses.so.6" ]; then
+                ln -sf /usr/lib/libncurses.so.6 /usr/lib/libncurses.so.5
+            fi
+            if [ ! -e "/usr/lib/libtinfo.so.5" ] && [ -e "/usr/lib/libtinfo.so.6" ]; then
+                ln -sf /usr/lib/libtinfo.so.6 /usr/lib/libtinfo.so.5
+            fi
+        fi
     fi
-    log "Info" "Install dependencies packages for Database completed..."
-
+    _info "Install dependencies for Database completed..."
     id -u mysql >/dev/null 2>&1
     [ $? -ne 0 ] && useradd -M -s /sbin/nologin mysql
-
     if echo "${mysql}" | grep -qi "mysql"; then
         mkdir -p ${mysql_location} ${mysql_data_location}
     elif echo "${mysql}" | grep -qi "mariadb"; then
         mkdir -p ${mariadb_location} ${mariadb_data_location}
-    elif echo "${mysql}" | grep -qi "Percona"; then
-        mkdir -p ${percona_location} ${percona_data_location}
     fi
 }
 
@@ -179,7 +161,7 @@ create_mysql_my_cnf(){
         replica=""
     fi
 
-    log "Info" "create my.cnf file..."
+    _info "create my.cnf file..."
     cat >${my_cnf_location} <<EOF
 [mysql]
 
@@ -228,7 +210,7 @@ ${replica}
 
 EOF
 
-    log "Info" "create my.cnf file at ${my_cnf_location} completed."
+    _info "create my.cnf file at ${my_cnf_location} completed."
 
 }
 
@@ -239,7 +221,6 @@ common_setup(){
     rm -f /etc/ld.so.conf.d/mysql.conf
 
     if [ -d "${mysql_location}" ]; then
-
         local db_name="MySQL"
         local db_pass="${mysql_root_pass}"
         ln -s ${mysql_location}/bin/mysql /usr/bin/mysql
@@ -251,9 +232,7 @@ common_setup(){
         create_lib64_dir "${mysql_location}"
         echo "${mysql_location}/lib" >> /etc/ld.so.conf.d/mysql.conf
         echo "${mysql_location}/lib64" >> /etc/ld.so.conf.d/mysql.conf
-
     elif [ -d "${mariadb_location}" ]; then
-
         local db_name="MariaDB"
         local db_pass="${mariadb_root_pass}"
         ln -s ${mariadb_location}/bin/mysql /usr/bin/mysql
@@ -265,47 +244,38 @@ common_setup(){
         create_lib64_dir "${mariadb_location}"
         echo "${mariadb_location}/lib" >> /etc/ld.so.conf.d/mysql.conf
         echo "${mariadb_location}/lib64" >> /etc/ld.so.conf.d/mysql.conf
-
-    elif [ -d "${percona_location}" ]; then
-
-        local db_name="Percona Server"
-        local db_pass="${percona_root_pass}"
-        ln -s ${percona_location}/bin/mysql /usr/bin/mysql
-        ln -s ${percona_location}/bin/mysqldump /usr/bin/mysqldump
-        ln -s ${percona_location}/bin/mysqladmin /usr/bin/mysqladmin
-        cp -f ${percona_location}/support-files/mysql.server /etc/init.d/mysqld
-        sed -i "s:^basedir=.*:basedir=${percona_location}:g" /etc/init.d/mysqld
-        sed -i "s:^datadir=.*:datadir=${percona_data_location}:g" /etc/init.d/mysqld
-        create_lib64_dir "${percona_location}"
-        echo "${percona_location}/lib" >> /etc/ld.so.conf.d/mysql.conf
-        echo "${percona_location}/lib64" >> /etc/ld.so.conf.d/mysql.conf
-
     fi
 
     ldconfig
     chmod +x /etc/init.d/mysqld
     boot_start mysqld
 
-    log "Info" "Starting ${db_name}..."
+    _info "Starting ${db_name}..."
     /etc/init.d/mysqld start > /dev/null 2>&1
-    if [ "${mysql}" == "${mysql8_0_filename}" ] || [ "${mysql}" == "${percona8_0_filename}" ]; then
-        /usr/bin/mysql -uroot -hlocalhost -e "create user root@'127.0.0.1' identified by \"${db_pass}\";"
-        /usr/bin/mysql -uroot -hlocalhost -e "grant all privileges on *.* to root@'127.0.0.1' with grant option;"
-        /usr/bin/mysql -uroot -hlocalhost -e "grant all privileges on *.* to root@'localhost' with grant option;"
-        /usr/bin/mysql -uroot -hlocalhost -e "alter user root@'localhost' identified by \"${db_pass}\";"
-    else
-        /usr/bin/mysql -e "grant all privileges on *.* to root@'127.0.0.1' identified by \"${db_pass}\" with grant option;"
-        /usr/bin/mysql -e "grant all privileges on *.* to root@'localhost' identified by \"${db_pass}\" with grant option;"
-        /usr/bin/mysql -uroot -p${db_pass} <<EOF
+    sleep 1
+    if [ $? -eq 0 ]; then
+        if [ "${mysql}" == "${mysql8_0_filename}" ]; then
+            /usr/bin/mysql -uroot -hlocalhost -e "create user root@'127.0.0.1' identified by \"${db_pass}\";"
+            /usr/bin/mysql -uroot -hlocalhost -e "grant all privileges on *.* to root@'127.0.0.1' with grant option;"
+            /usr/bin/mysql -uroot -hlocalhost -e "grant all privileges on *.* to root@'localhost' with grant option;"
+            /usr/bin/mysql -uroot -hlocalhost -e "alter user root@'localhost' identified by \"${db_pass}\";"
+        else
+            /usr/bin/mysql -e "grant all privileges on *.* to root@'127.0.0.1' identified by \"${db_pass}\" with grant option;"
+            /usr/bin/mysql -e "grant all privileges on *.* to root@'localhost' identified by \"${db_pass}\" with grant option;"
+            /usr/bin/mysql -uroot -p${db_pass} 2>/dev/null <<EOF
 drop database if exists test;
-delete from mysql.user where not (user='root');
 delete from mysql.db where user='';
+delete from mysql.user where user='';
+delete from mysql.user where user='mysql';
 flush privileges;
 exit
 EOF
+        fi
+    else
+        _warn "${mysql} looks like not running, please manually grant privileges for root user if necessary."
     fi
 
-    log "Info" "Shutting down ${db_name}..."
+    _info "Shutting down ${db_name}..."
     /etc/init.d/mysqld stop > /dev/null 2>&1
 
 }
@@ -318,7 +288,7 @@ install_mysqld(){
     is_64bit && sys_bit=x86_64 || sys_bit=i686
     mysql_ver=$(echo ${mysql} | sed 's/[^0-9.]//g' | cut -d. -f1-2)
     cd ${cur_dir}/software/
-    log "Info" "Downloading and Extracting MySQL files..."
+    _info "Downloading and Extracting MySQL files..."
 
     mysql_filename="${mysql}-linux-glibc2.12-${sys_bit}"
     if [ "${mysql_ver}" == "8.0" ]; then
@@ -331,7 +301,7 @@ install_mysqld(){
         tar zxf ${mysql_filename}.tar.gz
     fi
 
-    log "Info" "Moving MySQL files..."
+    _info "Moving MySQL files..."
     mv ${mysql_filename}/* ${mysql_location}
 
     config_mysql ${mysql_ver}
@@ -356,11 +326,7 @@ config_mysql(){
     if [ "${version}" == "8.0" ]; then
         echo "default_authentication_plugin  = mysql_native_password" >> /etc/my.cnf
     fi
-    if [ "${version}" == "5.5" ] || [ "${version}" == "5.6" ]; then
-        ${mysql_location}/scripts/mysql_install_db --basedir=${mysql_location} --datadir=${mysql_data_location} --user=mysql
-    elif [ "${version}" == "5.7" ] || [ "${version}" == "8.0" ]; then
-        ${mysql_location}/bin/mysqld --initialize-insecure --basedir=${mysql_location} --datadir=${mysql_data_location} --user=mysql
-    fi
+    ${mysql_location}/bin/mysqld --initialize-insecure --basedir=${mysql_location} --datadir=${mysql_data_location} --user=mysql
 
     common_setup
 
@@ -375,6 +341,11 @@ install_mariadb(){
         glibc_flag=linux
     else
         glibc_flag=linux-glibc_214
+        if [[ "${mysql}" == "${mariadb10_5_filename}" || \
+              "${mysql}" == "${mariadb10_6_filename}" || \
+              "${mysql}" == "${mariadb10_7_filename}" ]]; then
+            glibc_flag=linux-systemd
+        fi
     fi
 
     is_64bit && sys_bit_a=x86_64 || sys_bit_a=x86
@@ -382,7 +353,7 @@ install_mariadb(){
 
     mariadb_filename="${mysql}-${glibc_flag}-${sys_bit_b}"
     if [ "$(get_ip_country)" == "CN" ]; then
-        mariadb_filename_url="http://mirrors.aliyun.com/mariadb/${mysql}/bintar-${glibc_flag}-${sys_bit_a}/${mariadb_filename}.tar.gz"
+        mariadb_filename_url="https://mirrors.ustc.edu.cn/mariadb/${mysql}/bintar-${glibc_flag}-${sys_bit_a}/${mariadb_filename}.tar.gz"
     else
         mariadb_filename_url="http://sfo1.mirrors.digitalocean.com/mariadb/${mysql}/bintar-${glibc_flag}-${sys_bit_a}/${mariadb_filename}.tar.gz"
     fi
@@ -390,9 +361,9 @@ install_mariadb(){
     cd ${cur_dir}/software/
     download_file "${mariadb_filename}.tar.gz" "${mariadb_filename_url}"
 
-    log "Info" "Extracting MariaDB files..."
+    _info "Extracting MariaDB files..."
     tar zxf ${mariadb_filename}.tar.gz
-    log "Info" "Moving MariaDB files..."
+    _info "Moving MariaDB files..."
     mv ${mariadb_filename}/* ${mariadb_location}
 
     config_mariadb
@@ -417,87 +388,4 @@ config_mariadb(){
 
     common_setup
 
-}
-
-#Install percona server
-install_percona(){
-
-    common_install
-
-    is_64bit && sys_bit=x86_64 || sys_bit=i686
-    if check_sys packageManager apt; then
-        if [ -n "$(get_debianversion)" ] && [ $(get_debianversion) -lt 9 ]; then
-            local ssl_ver="ssl100"
-        fi
-        if [ -n "$(get_ubuntuversion)" ] && [ $(get_ubuntuversion) -ge 14 ]; then
-            local ssl_ver="ssl102"
-        fi
-        if [ -n "$(get_debianversion)" ] && [ $(get_debianversion) -eq 9 ]; then
-            local ssl_ver="ssl102"
-        fi
-    elif check_sys packageManager yum; then
-        local ssl_ver="ssl101"
-    fi
-    local percona_ver=$(echo ${mysql} | sed 's/[^0-9.]//g' | cut -d. -f1-2)
-    local major_ver=$(echo ${mysql} | cut -d'-' -f1-3)
-    local rel_ver=$(echo ${mysql} | awk -F'-' '{print $4}')
-    local down_addr="https://www.percona.com/downloads/Percona-Server-${percona_ver}/${mysql}/binary/tarball"
-
-    if [[ "${percona_ver}" == "5.5" || "${percona_ver}" == "5.6" ]]; then
-        percona_filename="${major_ver}-rel${rel_ver}-Linux.${sys_bit}.${ssl_ver}"
-    fi
-    if [[ "${percona_ver}" == "5.7" || "${percona_ver}" == "8.0" ]]; then
-        percona_filename="${mysql}-Linux.${sys_bit}.${ssl_ver}"
-    fi
-    percona_filename_url="${down_addr}/${percona_filename}.tar.gz"
-
-    cd ${cur_dir}/software/
-    download_file "${percona_filename}.tar.gz" "${percona_filename_url}"
-    log "Info" "Extracting Percona Server files..."
-    tar zxf ${percona_filename}.tar.gz
-    log "Info" "Moving Percona Server files..."
-    mv ${percona_filename}/* ${percona_location}
-
-    config_percona ${percona_ver}
-
-    add_to_env "${percona_location}"
-}
-
-#Configuration percona
-config_percona(){
-    local version=${1}
-
-    if [ -f /etc/my.cnf ];then
-        mv /etc/my.cnf /etc/my.cnf.bak
-    fi
-    [ -d '/etc/mysql' ] && mv /etc/mysql{,_bk}
-
-    chown -R mysql:mysql ${percona_location} ${percona_data_location}
-
-    #create my.cnf
-    create_mysql_my_cnf "${percona_data_location}" "false" "false" "/etc/my.cnf"
-
-    if [ "${version}" == "8.0" ]; then
-        echo "default_authentication_plugin  = mysql_native_password" >> /etc/my.cnf
-    fi
-
-    sed -ir "s@/usr/local/${percona_filename}@${percona_location}@g" ${percona_location}/bin/mysqld_safe
-    sed -ir "s@/usr/local/${percona_filename}@${percona_location}@g" ${percona_location}/bin/mysql_config
-
-    if [ ${version} == "5.5" ] || [ ${version} == "5.6" ]; then
-        ${percona_location}/scripts/mysql_install_db --basedir=${percona_location} --datadir=${percona_data_location} --user=mysql
-    elif [ ${version} == "5.7" ] || [ ${version} == "8.0" ]; then
-        ${percona_location}/bin/mysqld --initialize-insecure --basedir=${percona_location} --datadir=${percona_data_location} --user=mysql
-    fi
-
-    common_setup
-
-    #Fix libmysqlclient issue
-    cd ${percona_location}/lib/
-    ln -s libperconaserverclient.a libmysqlclient.a
-    ln -s libperconaserverclient.so libmysqlclient.so
-    if [ "${mysql}" != "${percona5_7_filename}" ] && [ "${mysql}" != "${percona8_0_filename}" ]; then
-        ln -s libperconaserverclient_r.a libmysqlclient_r.a
-        ln -s libperconaserverclient_r.so libmysqlclient_r.so
-    fi
 }
